@@ -1,0 +1,1 @@
+Test for MLKit ImageLabeling photos in my gallery
