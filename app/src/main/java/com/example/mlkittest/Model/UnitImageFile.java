@@ -1,12 +1,6 @@
 package com.example.mlkittest.Model;
 
-import android.content.ContentResolver;
-import android.database.Cursor;
-import android.net.Uri;
-import android.provider.MediaStore;
-import android.provider.OpenableColumns;
 import android.util.Log;
-
 import androidx.exifinterface.media.ExifInterface;
 
 import java.io.File;
@@ -90,4 +84,5 @@ public class UnitImageFile {
     public String getFilename() {
         return file.getName();
     }
+    public File getFile() { return file; }
 }
