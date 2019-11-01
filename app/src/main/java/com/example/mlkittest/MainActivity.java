@@ -1,14 +1,19 @@
 package com.example.mlkittest;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
-import android.content.ClipData;
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.View;
@@ -17,122 +22,189 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.example.mlkittest.Model.Label;
+import com.example.mlkittest.Model.TimeGroupAlgorithm;
+import com.example.mlkittest.Model.UnitImageFile;
+import com.example.mlkittest.Model.UnitImageFileGroup;
+import com.example.mlkittest.Util.ImageFileLabeler;
+import com.google.android.gms.vision.label.ImageLabeler;
+
+import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends AppCompatActivity {
     public static int PICK_IMAGE_MULTIPLE = 1;
-    List<Uri> imageUris;
-
-    ImageView imageView;
-    Button button;
-    TextView textView;
-
+    TextView textView1;
+    TextView textView2;
     Bitmap bitmap;
+
+    private int finishedTaskCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        imageView = findViewById(R.id.imageView);
-        button = findViewById(R.id.button);
-        textView = findViewById(R.id.textView);
+        textView1 = findViewById(R.id.textView1);
+        textView2 = findViewById(R.id.textView2);
         bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.cat_dog);
 
-        button.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                Intent intent = new Intent();
-                intent.setType("image/*");
-                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                intent.setAction(Intent.ACTION_GET_CONTENT);
-                startActivityForResult(Intent.createChooser(intent,"Select Picture"), PICK_IMAGE_MULTIPLE);
-            }
-        });
-    }
+        //  파일 쓰기 권한 확인
+        int permissionCheck = ContextCompat.checkSelfPermission(this,Manifest.permission.READ_EXTERNAL_STORAGE);
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        try {
-            // When an Image is picked
-            if (requestCode == PICK_IMAGE_MULTIPLE && resultCode == RESULT_OK
-                    && null != data) {
-                // Get the Image from data
+        if (permissionCheck != PackageManager.PERMISSION_GRANTED) {
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.READ_EXTERNAL_STORAGE)) {
 
-                imageUris = new ArrayList<Uri>();
-                if(data.getData() != null){
-                    Uri mImageUri = data.getData();
-                    imageUris.add(mImageUri);
-                } else {
-                    if (data.getClipData() != null) {
-                        ClipData mClipData = data.getClipData();
-                        for (int i = 0; i < mClipData.getItemCount(); i++) {
-                            ClipData.Item item = mClipData.getItemAt(i);
-                            Uri uri = item.getUri();
-                            imageUris.add(uri);
-                        }
-                        Log.v("LOG_TAG", "Selected Images" + imageUris.size());
-                    }
-                }
             } else {
-                Toast.makeText(this, "You haven't picked Image",
-                        Toast.LENGTH_LONG).show();
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                        1001);
             }
-        } catch (Exception e) {
-            Toast.makeText(this, "Something went wrong", Toast.LENGTH_LONG)
-                    .show();
         }
 
-        processImagesWithMlkit();
-        super.onActivityResult(requestCode, resultCode, data);
+        //  이미지 -> 단위 이미지
+        List<String> filePaths = getListOfFile();
+        List<UnitImageFile> selectedImages = new ArrayList<>();
+        for (String path: filePaths) {
+            selectedImages.add(new UnitImageFile(path));
+        }
+
+
+        //  시간 단위 클러스터링
+        TimeGroupAlgorithm algorithm = new TimeGroupAlgorithm();
+        List<UnitImageFileGroup> processedGroups = algorithm.processImages(selectedImages);
+        for (int groupIdx = 0; groupIdx < processedGroups.size(); groupIdx++) {
+            textView1.append("idx: " + groupIdx + "\n");
+
+            List<UnitImageFile> images = processedGroups.get(groupIdx).getImages();
+            textView1.append("length: " + images.size() + "\n");
+
+            for (int imageIdx = 0; imageIdx < images.size(); imageIdx++) {
+                UnitImageFile image = images.get(imageIdx);
+                textView1.append("filename: " + image.getFilename() + "\n");
+            }
+            textView1.append("\n\n\n");
+        }
+
+
+        //  시간 단위 그룹 레이블링
+        for (int groupIdx = 0; groupIdx < processedGroups.size(); groupIdx++) {
+            List<UnitImageFile> images = processedGroups.get(groupIdx).getImages();
+
+            new AsyncLabelingTask(() -> {
+                finishedTaskCount++;
+                if (finishedTaskCount % 20 == 0) {
+                    Toast.makeText(this, "그룹 " + finishedTaskCount + " 완료. ", Toast.LENGTH_SHORT).show();
+                }
+            }).execute(images);
+        }
     }
 
-    protected void processImagesWithMlkit() {
-        textView.clearComposingText();
-        for (Uri imageUri: imageUris) {
-            UriLabeler uriLabeler = new UriLabeler(imageUri, new UriLabeler.UriLabelerListener() {
-                @Override
-                public void onSuccess(Uri uri, List<UriLabeler.Label> labels) {
-                    String filename = null;
-                    if (uri.getScheme().equals("content")) {
-                        Cursor cursor = getContentResolver().query(uri, null, null, null, null);
-                        try {
-                            if (cursor != null && cursor.moveToFirst()) {
-                                filename = cursor.getString(cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME));
-                            }
-                        } finally {
-                            cursor.close();
-                        }
-                    }
+    private static List<String> getListOfFile(){
+        List<String> list = new ArrayList<>();
+        File file = null;
+        if (!Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
+//            Toast.makeText(getContext(), "Error! No SDCARD Found!", Toast.LENGTH_LONG).show();
+        } else {
+            // Locate the image folder in your SD Card
+            file = new File(Environment.getExternalStorageDirectory()
+                    + File.separator + "DCIM/Camera");
+            // Create a new folder if no folder named SDImageTutorial exist
+            file.mkdirs();
+        }
 
-                    if (filename == null) {
-                        filename = uri.getPath();
-                        int cut = filename.lastIndexOf('/');
-                        if (cut != -1) {
-                            filename = filename.substring(cut + 1);
-                        }
-                    }
+        List<File> files = null;
+        if (file.isDirectory()) {
+            files = Arrays.asList(file.listFiles((File dir, String name) -> name.toLowerCase().endsWith(".jpg")));
+            Log.e("LENGTH", String.valueOf(files.size()));
 
-                    textView.append("{\n" +
-                            "  \"filename\": \"" + filename + "\",\n" +
-                            "  \"labels\": [\n" +
-                            "    ");
-                    for (UriLabeler.Label label : labels) {
-                        textView.append(label.toString() + ",\n");
-                    }
+            for (File imageFile: files) {
+                list.add(0, imageFile.getAbsolutePath());
+            }
+        }
 
-                    textView.append("  ]\n" +
-                            "}\n\n\n");
+        return list;
+    }
+
+    public interface OnTaskCompleted {
+        void onTaskCompleted();
+    }
+
+
+    /**
+     * Thread for Async MLKit Image Labeler
+     */
+    private class AsyncLabelingTask extends AsyncTask<List<UnitImageFile>, Integer, List<List<Label>>> {
+        List<List<Label>> result = new ArrayList<>();
+        List<String> filenames = new ArrayList<>();
+
+        // 쓰레드 종료 될 때 Callback listener
+        private OnTaskCompleted listener;
+
+        public AsyncLabelingTask(OnTaskCompleted listener){
+            this.listener = listener;
+        }
+
+        @Override
+        protected List<List<Label>> doInBackground(List<UnitImageFile>... files) {
+            List<List<Label>> fileLabels = processImagesWithMlkit(files[0]);
+            return fileLabels;
+        }
+
+        @Override
+        protected void onPostExecute(List<List<Label>> labels) {
+            super.onPostExecute(labels);
+
+            for (int lIdx = 0; lIdx < labels.size(); lIdx++) {
+                textView2.append("{\n" +
+                        "  \"filename\": \"" + filenames.get(lIdx) + "\"," +
+                        "  \"labels\": [\n" +
+                        "    ");
+                for (Label l: labels.get(lIdx)) {
+                    textView2.append(l.toString() + ",\n");
                 }
+                textView2.append("  ]\n" +
+                        "}\n\n\n");
+            }
+            textView2.append("/*------------------------------------------*/");
+            listener.onTaskCompleted();
+        }
 
-                @Override
-                public void onFailure(Uri uri) {
-                    Log.e("URILABELER", uri.toString());
-                }
-            });
+        private List<List<Label>> processImagesWithMlkit(List<UnitImageFile> imageFiles) {
+            final CountDownLatch latch = new CountDownLatch(imageFiles.size());
+            for (UnitImageFile imageFile: imageFiles) {
+                File file = imageFile.getFile();
 
-            uriLabeler.processUri(getApplicationContext());
+                ImageFileLabeler imageFileLabeler = new ImageFileLabeler(file, new ImageFileLabeler.ImageFileLabelerListener() {
+                    @Override
+                    public void onSuccess(File file, List<Label> labels) {
+                        result.add(labels);
+                        filenames.add(file.getName());
+
+                        latch.countDown();
+                    }
+
+                    @Override
+                    public void onFailure(File file) {
+                        Log.e("ImageFileLabeler", file.getName());
+                        latch.countDown();
+                    }
+                });
+
+                imageFileLabeler.process();
+            }
+
+            try {
+                latch.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Log.e("MLKIT_ASYNC_TASK", e.toString());
+            }
+
+            return result;
         }
     }
 }

@@ -8,6 +8,7 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 
+import com.example.mlkittest.Model.Label;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.ml.vision.FirebaseVision;
@@ -24,23 +25,6 @@ public class UriLabeler {
     public interface UriLabelerListener {
         void onSuccess(Uri uri, List<Label> labels);
         void onFailure(Uri uri);
-    }
-
-    class Label {
-        String text;
-        String entityId;
-        Float confidence;
-
-        public Label(String text, String entityId, Float confidence) {
-            this.text = text;
-            this.entityId = entityId;
-            this.confidence = confidence;
-        }
-
-        @Override
-        public String toString() {
-            return "{ \"text\": \"" + text + "\", \"entityID\": \"" + entityId + "\", \"confidence\": " + confidence + " }";
-        }
     }
 
     private FirebaseVisionImage firebaseImage;
