@@ -1,7 +1,10 @@
 package com.example.mlkittest.Model;
 
+import android.graphics.Bitmap;
 import android.util.Log;
 import androidx.exifinterface.media.ExifInterface;
+
+import com.example.mlkittest.Model.imagehash.AverageHash;
 
 import java.io.File;
 import java.io.IOException;
@@ -14,23 +17,44 @@ import java.time.ZoneId;
 public class UnitImageFile {
     private File file;
     private LocalDateTime creationTime;
+    private String imageHash;
 
     public UnitImageFile(String path) {
+
         this.file  = new File(path);
+        this.creationTime = buildCreationTime();
+        this.imageHash = buildHash();
+    }
+
+    public UnitImageFile(File file) {
+
+        this.file  = file;
+        this.creationTime = buildCreationTime();
+        this.imageHash = buildHash();
     }
 
     public LocalDateTime getCreationTime() {
-        if (this.creationTime != null) {
-            return this.creationTime;
-        }
-
-        if (hasExifCreationTime()) {
-            this.creationTime = getExifCreationTime();
-        } else {
-            this.creationTime = getFileCreationTime();
-        }
-
         return this.creationTime;
+    }
+
+    public String getImageHash() {
+        return this.imageHash;
+    }
+
+    private LocalDateTime buildCreationTime() {
+        if (hasExifCreationTime()) {
+            return getExifCreationTime();
+        } else {
+            return getFileCreationTime();
+        }
+    }
+
+    private String buildHash() {
+        Bitmap resizedBmp = AverageHash.resizeTo8x8(file);
+        Bitmap grayscaleBmp = AverageHash.toGreyscale(resizedBmp);
+        String hashF = AverageHash.buildHash(grayscaleBmp);
+
+        return hashF;
     }
 
     // EXIF 메타 데이터에서 촬영시각 가져오기
